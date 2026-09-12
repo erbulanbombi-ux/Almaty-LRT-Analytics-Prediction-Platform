@@ -5,11 +5,11 @@ import pandas as pd
 from pathlib import Path
 from sklearn.compose import ColumnTransformer
 from sklearn.base import clone
-from sklearn.linear_model import Ridge
 from sklearn.preprocessing import OneHotEncoder
-from sklearn.ensemble import HistGradientBoostingRegressor
-from sklearn.metrics import mean_absolute_error, root_mean_squared_error, r2_score
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import TimeSeriesSplit
+from sklearn.inspection import permutation_importance
 
 def load_config(config_path="config.yaml"):
     with open(config_path, "r", encoding="utf-8") as f:
@@ -24,11 +24,20 @@ def build_preprocessor(num_features, cat_features):
     )
 
 def build_model(config):
-    return HistGradientBoostingRegressor(
-        max_iter=config['training']['max_iter'],
-        learning_rate=config['training']['learning_rate'],
+    return RandomForestRegressor(
+        n_estimators=config['training']['n_estimators'],
+        max_depth=config['training']['max_depth'],
+        n_jobs=-1,
         random_state=config['training']['random_state']
     )
+
+
+def score_metrics(y_true, predictions):
+    return {
+        'MAE': round(float(mean_absolute_error(y_true, predictions)), 4),
+        'RMSE': round(float(mean_squared_error(y_true, predictions) ** 0.5), 4),
+        'R2': round(float(r2_score(y_true, predictions)), 4),
+    }
 
 def train():
     config = load_config()
@@ -42,6 +51,7 @@ def train():
     cat_features = config['model']['features']['categorical']
     target = config['model']['target']
 
+    df = df.sort_values('timestamp')
     X = df[num_features + cat_features]
     y = df[target]
 
@@ -60,25 +70,11 @@ def train():
 
     preds = model.predict(X_test_prep)
 
-    mae = mean_absolute_error(y_test, preds)
-    rmse = root_mean_squared_error(y_test, preds)
-    r2 = r2_score(y_test, preds)
-
-    comparison = {'Ridge baseline': {}}
-    baseline_preprocessor = build_preprocessor(num_features, cat_features)
-    baseline_train = baseline_preprocessor.fit_transform(X_train)
-    baseline_test = baseline_preprocessor.transform(X_test)
-    baseline = Ridge(alpha=1.0).fit(baseline_train, y_train)
-    baseline_preds = baseline.predict(baseline_test)
-    comparison['Ridge baseline'] = {
-        'MAE': round(float(mean_absolute_error(y_test, baseline_preds)), 4),
-        'RMSE': round(float(root_mean_squared_error(y_test, baseline_preds)), 4),
-        'R2': round(float(r2_score(y_test, baseline_preds)), 4),
-    }
-    comparison['HistGradientBoosting'] = {
-        'MAE': round(float(mae), 4),
-        'RMSE': round(float(rmse), 4),
-        'R2': round(float(r2), 4),
+    baseline_by_hour = df.iloc[:split_idx].groupby('hour')[target].mean()
+    baseline_preds = X_test['hour'].map(baseline_by_hour).fillna(y_train.mean())
+    comparison = {
+        'Mean by hour baseline': score_metrics(y_test, baseline_preds),
+        'Random Forest': score_metrics(y_test, preds),
     }
 
     time_split = TimeSeriesSplit(n_splits=5)
@@ -91,15 +87,31 @@ def train():
         fold_model.fit(fold_train, y.iloc[train_indices])
         fold_predictions = fold_model.predict(fold_validation)
         cv_scores.append({
-            'MAE': round(float(mean_absolute_error(y.iloc[validation_indices], fold_predictions)), 4),
-            'RMSE': round(float(root_mean_squared_error(y.iloc[validation_indices], fold_predictions)), 4),
-            'R2': round(float(r2_score(y.iloc[validation_indices], fold_predictions)), 4),
+            **score_metrics(y.iloc[validation_indices], fold_predictions),
         })
 
+    importance = permutation_importance(
+        model, X_test_prep, y_test, n_repeats=5,
+        random_state=config['training']['random_state'], scoring='neg_mean_absolute_error'
+    )
+    feature_importance = dict(sorted(
+        zip(preprocessor.get_feature_names_out(), importance.importances_mean),
+        key=lambda item: item[1], reverse=True
+    )[:15])
+    missing_values = df.isna().sum().to_dict()
+    numeric_summary = df.select_dtypes(include='number').describe().to_dict()
+
     metrics = {
-        "MAE": round(float(mae), 4),
-        "RMSE": round(float(rmse), 4),
-        "R2": round(float(r2), 4),
+        "MAE": comparison['Random Forest']['MAE'],
+        "RMSE": comparison['Random Forest']['RMSE'],
+        "R2": comparison['Random Forest']['R2'],
+        "target": target,
+        "train_rows": len(X_train),
+        "test_rows": len(X_test),
+        "train_end": str(df.iloc[split_idx - 1]['timestamp']),
+        "test_start": str(df.iloc[split_idx]['timestamp']),
+        "eda": {'missing_values': missing_values, 'numeric_summary': numeric_summary},
+        "permutation_importance": feature_importance,
         "time_series_cv": cv_scores,
         "model_comparison": comparison,
     }

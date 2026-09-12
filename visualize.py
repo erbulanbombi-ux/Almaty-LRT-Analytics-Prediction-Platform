@@ -2,19 +2,17 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import joblib
+import yaml
 from sklearn.inspection import permutation_importance
 
 def plot_analytics():
     df = pd.read_csv('data/lrt_data.csv')
     saved_objects = joblib.load('models/lrt_model.joblib')
+    with open('config.yaml', encoding='utf-8') as file:
+        config = yaml.safe_load(file)
     model = saved_objects['model']
     preprocessor = saved_objects['preprocessor']
-    
-    features = [
-        'corridor_id', 'elevation_slope_deg', 'lane_isolation_score',
-        'turning_conflicts', 'passenger_density', 'weather_impact',
-        'is_peak_hour', 'delay_lag_15m', 'delay_lag_30m'
-    ]
+    features = config['model']['features']['numeric'] + config['model']['features']['categorical']
     
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     

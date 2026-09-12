@@ -15,8 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_training_writes_time_series_metrics():
     metrics = json.loads((ROOT / "reports" / "metrics.json").read_text(encoding="utf-8"))
     assert len(metrics["time_series_cv"]) == 5
-    assert "Ridge baseline" in metrics["model_comparison"]
-    assert "HistGradientBoosting" in metrics["model_comparison"]
+    assert "Mean by hour baseline" in metrics["model_comparison"]
+    assert "Random Forest" in metrics["model_comparison"]
+    assert metrics["model_comparison"]["Random Forest"]["MAE"] < metrics["model_comparison"]["Mean by hour baseline"]["MAE"]
 
 
 def test_training_columns_match_config():
@@ -40,6 +41,10 @@ def test_api_health_and_prediction():
             "delay_lag_30m": 0.8,
             "corridor_id": "LRT-1",
             "weather_impact": "clear",
+            "hour": 8,
+            "day_of_week": 1,
+            "is_weekend": 0,
+            "is_holiday": 0,
             "is_peak_hour": 1,
         },
     )

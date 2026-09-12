@@ -10,17 +10,21 @@ model:
       - "lane_isolation_score"
       - "turning_conflicts"
       - "passenger_density"
+      - "hour"
+      - "day_of_week"
+      - "is_weekend"
+      - "is_holiday"
+      - "is_peak_hour"
       - "delay_lag_15m"
       - "delay_lag_30m"
     categorical:
       - "corridor_id"
       - "weather_impact"
-      - "is_peak_hour"
   save_path: "models/lrt_model.joblib"
   reports_path: "reports/metrics.json"
 
 training:
   test_size: 0.2
   random_state: 42
-  max_iter: 150
-  learning_rate: 0.05
+  n_estimators: 250
+  max_depth: 10
